@@ -22,6 +22,8 @@
     "S02E05": "bun run S02E05/app.ts",
     "S03E01": "bun run S03E01/app.ts",
     "S03E02": "bun run S03E02/app.ts",
+    "S03E03": "bun run S03E03/app.ts",
+    "S03E04": "bun run S03E04/app.ts",
     "chain": "bun run chain/app.ts",
     "completion": "bun run completion/app.ts",
     "sdk": "bun run sdk/app.ts",

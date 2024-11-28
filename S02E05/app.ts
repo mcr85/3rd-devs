@@ -5,7 +5,7 @@ import { join } from 'path';
 import { writeFile } from 'fs/promises';
 import { readFile } from 'fs/promises';
 import { OpenAIService } from '../mcr_lib/OpenAIService';
-import type { ChatCompletionContentPartImage, ChatCompletionContentPartText, ChatCompletionMessageParam, ChatCompletionSystemMessageParam } from 'ai/prompts';
+import type { ChatCompletionContentPartImage, ChatCompletionContentPartText, ChatCompletionMessageParam } from 'ai/prompts';
 
 interface AudioMetadata {
     buffer: Buffer;
