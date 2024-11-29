@@ -1,12 +1,14 @@
-import type { ChatCompletionMessageParam } from "ai/prompts";
+import type { ChatCompletionMessageParam } from 'ai/prompts';
 import OpenAI, { toFile } from 'openai';
-import type { ChatCompletionParseParams } from "openai/resources/beta/chat/completions.mjs";
-import type { CreateEmbeddingResponse } from "openai/resources/embeddings";
+import type { ChatCompletionParseParams } from 'openai/resources/beta/chat/completions';
+import type { ChatCompletion, ChatCompletionTool } from 'openai/resources/chat/completions';
+import type { CreateEmbeddingResponse } from 'openai/resources/embeddings';
 
 export interface OpenAIOptions {
     model?: string;
     max_tokens?: number;
     temperature?: number;
+    tools?: ChatCompletionTool[];
 }
 
 export class OpenAIService {
@@ -17,7 +19,7 @@ export class OpenAIService {
         this.openai = new OpenAI();
     }
 
-    async send(message: string, context?: ChatCompletionMessageParam[], options?: OpenAIOptions): Promise<string> {
+    async send(message: string, context?: ChatCompletionMessageParam[], options?: OpenAIOptions): Promise<string | ChatCompletion.Choice> {
         const ctx = context ?? [];
         const messages: ChatCompletionMessageParam[] = [
             ...ctx,
@@ -28,8 +30,12 @@ export class OpenAIService {
             const chatCompletionParams = {
                 messages,
                 model: options?.model ?? 'gpt-4o-mini',
-                temperature: options?.temperature ?? 0.5
+                temperature: options?.temperature ?? 0.5,
             } as ChatCompletionParseParams;
+
+            if (options?.tools) {
+                chatCompletionParams.tools = options.tools;
+            }
 
             if (options?.max_tokens) {
                 chatCompletionParams.max_tokens = options.max_tokens;
@@ -37,9 +43,11 @@ export class OpenAIService {
 
             const chatCompletion = await this.openai.chat.completions.create(chatCompletionParams)
 
-            const response = chatCompletion.choices[0].message.content?.trim() as string;
-
-            return response;
+            if (options?.tools) {
+;               return chatCompletion.choices[0] as ChatCompletion.Choice;
+            } else {
+                return chatCompletion.choices[0].message.content?.trim() as string;
+            }
         } catch (error) {
             console.error('Error in OpenAI completion:', error);
             return '';
