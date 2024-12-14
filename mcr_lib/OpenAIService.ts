@@ -7,6 +7,7 @@ import type { CreateEmbeddingResponse } from 'openai/resources/embeddings';
 export interface OpenAIOptions {
     model?: string;
     max_tokens?: number;
+    jsonMode?: boolean;
     temperature?: number;
     tools?: ChatCompletionTool[];
 }
@@ -39,6 +40,10 @@ export class OpenAIService {
 
             if (options?.max_tokens) {
                 chatCompletionParams.max_tokens = options.max_tokens;
+            }
+
+            if (options?.jsonMode) {
+                chatCompletionParams.response_format = options.jsonMode ? { type: "json_object" } : { type: "text" }
             }
 
             const chatCompletion = await this.openai.chat.completions.create(chatCompletionParams)
