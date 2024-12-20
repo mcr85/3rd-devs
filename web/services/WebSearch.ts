@@ -40,6 +40,7 @@ export class WebSearchService {
       { name: 'OpenAI News', url: 'https://openai.com/news', scrappable: true },
       { name: 'Anthropic News', url: 'https://www.anthropic.com/news', scrappable: true },
       { name: 'DeepMind Press', url: 'https://deepmind.google/about/press', scrappable: true },
+      { name: 'SoftoAI', url: 'https://softo.ag3nts.org', scrappable: true },
     ];
     this.apiKey = process.env.FIRECRAWL_API_KEY || '';
     this.firecrawlApp = new FirecrawlApp({ apiKey: this.apiKey });
