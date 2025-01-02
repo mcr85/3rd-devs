@@ -3,30 +3,115 @@
     2. Na stronie mogą pojawić się 2-3 linki, które potencjalnie wyglądają, jakby mogły zawierać wartościowe dane. Nie wchodź w każdy z nich, a jedynie w ten najbardziej prawdopodobny.
     3. Możesz (ale nie musisz!) sporządzić mapę odwiedzonych stron i ich zawartości. Szukając odpowiedzi na pytanie nr 01, prawdopodobnie odwiedzisz kilka stron. Czy szukając odpowiedzi na pytanie 02 i 03 naprawdę musisz odwiedzać je ponownie i znów wysyłać ich treść do LLM-a?
  */
-import chalk from "chalk";
+import chalk from 'chalk';
+import { readFile, writeFile } from 'fs/promises';
 import FirecrawlApp, { type ScrapeResponse } from '@mendable/firecrawl-js';
+import { OpenAIService } from '../mcr_lib/OpenAIService';
+import { VectorService } from '../mcr_lib/VectorService';
+import { write } from 'console';
+import path from 'path';
 
 const apiKey = process.env.CENTRALA;
 const fireCrawlApiKey = process.env.FIRECRAWL_API_KEY;
 
+const COLLECTION_NAME = 'pages';
+
+interface Link {
+    url: string;
+    linkText?: string;
+    title?: string
+}
+
+interface Page {
+    url: string;
+    title?: string;
+    description?: string;
+    content?: string;
+    links: Link[];
+}
+
+// const pagesFile: { pages: Page[] } = await import('./pages.json');
+
 const mainPageUrl = 'https://softo.ag3nts.org/';
+const contactPageUrl = 'https://softo.ag3nts.org/kontakt';
+const portfolioBanan = 'https://softo.ag3nts.org/portfolio_1_c4ca4238a0b923820dcc509a6f75849b';
 const questionsUrl = `https://centrala.ag3nts.org/data/${apiKey}/softo.json`
 
 // TODO: get main section links
 // discovered links won't have descriptions/summary yet. You can always updated data about them later
 
-async function getPageText(url: string) {
+async function getPage(url: string): Promise<Page> {
+    const pagesFile: { pages: Page[] } = await import('./pages.json');
+    const page = pagesFile.pages.find((page) => page.url === url);
+
+    if (page) {
+        console.log(chalk.yellow('📚 Got page from cache', page));
+        return page;
+    }
+
+    console.log(chalk.green('🔍 Scraping page...'));
     const firecrawl = new FirecrawlApp({ apiKey: fireCrawlApiKey });
     const result = await firecrawl.scrapeUrl(url, {
         formats: ['markdown', 'links'],
         onlyMainContent: false
     }) as ScrapeResponse;
-    
-    return result;
+
+    // const url = result.metadata?.url;
+    const title = result.metadata?.title;
+    const description = result.metadata?.description;
+    const content = result.markdown;
+    const links = extractLinks(result.markdown);
+
+    // TODO: add summary?
+
+    // TODO: add embedding
+
+    pagesFile.pages.push({
+        url,
+        title,
+        description,
+        content,
+        links
+    });
+
+    // TODO: write to qdrant instead
+    await writeFile(path.join(__dirname, 'pages.json'), JSON.stringify(pagesFile, null, 2));
+
+    return {
+        url,
+        title,
+        description,
+        content,
+        links
+    } as Page;
 }
 
+function extractLinks(text: string) {
+    const baseUrl = 'https://softo.ag3nts.org';
+    const links = [];
+
+    // const re = /\[(.+)\]\((\/\w+)\s"(.+)"/g
+    const re = /\[(.*?)\]\((.*?)\s?(?:"(.*?)")?\)/gm
+    let match;
+
+    while ((match = re.exec(text))) {
+        const [_, linkText, url, title] = match;
+        const link = {
+            url: baseUrl + url,
+            linkText,
+            title
+        }
+
+        links.push(link);
+
+        console.log(chalk.blueBright('🔗 Got link', link))
+    }
+
+    return links;
+}
 async function getQuestions() {
     console.log(chalk.green(' Fetching questions...'));
+
     let questions: Record<string, string>;
 
     try {
@@ -37,28 +122,188 @@ async function getQuestions() {
         questions = {};
     }
 
+    console.log(chalk.cyanBright('questions:', questions));
+
     return questions;
 }
 
-async function getAnswer(question: string) {
+async function getAnswer(openAIService: OpenAIService, question: string, content?: string) {
+    const answerQuestionPrompt = `Read below article and answer user question in following user message.
+If you can't find answer to user question in the article return "false".
+
+<article>
+${content}
+</article>
+
+Return answer in following json format:
+{ "answer": answer to user question }`;
+
+    return openAIService.send(
+        question,
+        [
+            {
+                role: 'system',
+                content: answerQuestionPrompt
+            }
+        ],
+        {
+            model: 'gpt-4o',
+            temperature: 1.0,
+            jsonMode: true
+        }
+    );
+
+
+    // TODO: add openai chat completion for above prompt
+
     // ask OpenAI for to extract keywords of what is being asked, like email address, company name, etc.
     // first try to search by keywords in database (vector db?)
     // if can't find it in database, then search on the web
 
-    // extract links with firecrawl: url, title, keywords, description
-    getPageText(mainPageUrl).then((result) => {
-        console.log('result:', result);
+    // 1. get most probable page
+    // plan: get page where you can find the answer and find it
 
-        // url,
-        // title,
-        // description,
-        // content: markdown
-    });
+    // extract links with firecrawl: url, title, keywords, description
+    // const page = await getPage(mainPageUrl);
+    // const page = await getPage(contactPageUrl);
+    // const page = await getPage(portfolioBanan);
+
+    console.log('page:', page);
+
+        // .then((result) => {
+        //     const url = result.metadata?.url;
+        //     const title = result.metadata?.title;
+        //     const description = result.metadata?.description;
+        //     const content = result.markdown;
+        //     const links = extractLinks(result.markdown);
+        //     console.log('result:', result);
+        //     console.log('result markdown', result.markdown);
+        //     console.log('result links', links);
+
+        //     return {
+        //         url,
+        //         title,
+        //         description,
+        //         content,
+        //         links
+        //     } as Page;
+
+        //     // links:
+        //     // url,
+        //     // title,
+        //     // description,
+        // });
 }
 
-const questions = await getQuestions();
+async function pickMostProbableLink(openAIService: OpenAIService, links: Link[], question: string) {
+    const prompt = `You are about to be asked a question by the user. Pick most probable page link to follow to get an answer to asked question. Use links from json containing links.
+<thinking>
+Consider link url and linkText and title which are in Polish language.
+</thinking>
 
-const answer = await getAnswer(questions['01']);
+<json>
+${links}
+</json>
+
+Return most probable link in json format:
+{
+"url": url,
+"linkText": linkText
+"title": title
+}`;
+
+    return openAIService.send(
+        question,
+        [
+            {
+                role: 'system',
+                content: prompt
+            }
+        ],
+        {
+            model: 'gpt-4o',
+            temperature: 1.0,
+            jsonMode: true
+        }
+    );
+}
+
+
+// loop through questions
+// determine page to get from database
+
+// check in qdrant if you can find a page for given question
+
+// if no candidate, determine page to get from web
+// check if answer is in page content
+
+async function main() {
+    const openAIService = new OpenAIService();
+    const vectorService = new VectorService(openAIService);
+
+    await vectorService.ensureCollection(COLLECTION_NAME);
+
+    const questions = await getQuestions();
+    const question = questions['01'];
+    let answer;
+
+    const pagesChecked = new Set();
+
+    // TODO: potential answer
+    const searchResults = await vectorService.performSearch(COLLECTION_NAME, question, {}, 1);
+    let page;
+
+    if (searchResults.length > 0) {
+        page = searchResults[0].payload;
+    }
+
+    console.log('search results', searchResults);
+
+    let link = mainPageUrl;
+
+    if (searchResults!.length === 0) {
+        console.log('no page for question in database');
+
+        // while (!answer) {
+            // getting page
+            const page = await getPage(link);
+
+            // adding it to db
+            const metadata = { ...page };
+            delete metadata.content;
+
+            vectorService.addPoints(COLLECTION_NAME, [{
+                text: page.content ?? '',
+                metadata
+            }]);
+
+            // TODO: add page to qdrant
+            console.log('page links', page.links);
+            const answerResponse = await getAnswer(openAIService, question, page.content);
+
+            if (!answerResponse.answer) {
+                pagesChecked.add(page.url);
+                console.log('No answer found in page content. Searching for most probable link...');
+                const links = page.links.filter((link) => !pagesChecked.has(link.url));
+                const mostProbableLink = await pickMostProbableLink(openAIService, links, question);
+                console.log('most probable link:', mostProbableLink);
+                link = mostProbableLink.url;
+            } else {
+                answer = answerResponse.answer;
+            }
+        // }
+
+        console.log(chalk.greenBright('🎉 Got answer to question:', answer));
+    } else {
+    }
+
+    // const answer = await getAnswer(questions['01']);
+}
+
+
+// console.log('mcr pagesFile', pagesFile.pages);
+
+
 
 
 /**
@@ -83,5 +328,7 @@ Try to find answer in page content. If you can't find it, follow the most probab
 // 
 
 
-console.log('questions:', questions);
-console.log('answers:', '01', answer);
+// console.log('questions:', questions);
+// console.log('answers:', '01', answer);
+
+main();

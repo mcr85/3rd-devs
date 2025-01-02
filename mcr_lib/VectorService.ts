@@ -65,12 +65,16 @@ export class VectorService {
   }
 
   async performSearch(collectionName: string, query: string, filter: Record<string, any> = {}, limit: number = 5) {
-    const queryEmbedding = await this.openAIService.createJinaEmbedding(query);
-    return this.client.search(collectionName, {
-      vector: queryEmbedding,
-      limit,
-      with_payload: true,
-      filter
-    });
+    try {
+        const queryEmbedding = await this.openAIService.createJinaEmbedding(query);
+        return this.client.search(collectionName, {
+          vector: queryEmbedding,
+          limit,
+          with_payload: true,
+          filter
+        });
+    } catch (err) {
+        console.error('Error creating Jina embedding:', err);
+    }
   }
 }

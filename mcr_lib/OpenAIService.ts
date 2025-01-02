@@ -112,6 +112,10 @@ export class OpenAIService {
                 })
             });
 
+            if (response.status === 401) {
+                throw new Error(`HTTP error! status: ${response.status}. Probably missing jina API key.`);
+            }
+
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
