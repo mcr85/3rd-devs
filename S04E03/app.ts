@@ -26,7 +26,7 @@ interface Page {
     url: string;
     title?: string;
     description?: string;
-    content?: string;
+    text?: string;
     links: Link[];
 }
 
@@ -41,13 +41,13 @@ const questionsUrl = `https://centrala.ag3nts.org/data/${apiKey}/softo.json`
 // discovered links won't have descriptions/summary yet. You can always updated data about them later
 
 async function getPage(url: string): Promise<Page> {
-    const pagesFile: { pages: Page[] } = await import('./pages.json');
-    const page = pagesFile.pages.find((page) => page.url === url);
+    // const pagesFile: { pages: Page[] } = await import('./pages.json');
+    // const page = pagesFile.pages.find((page) => page.url === url);
 
-    if (page) {
-        console.log(chalk.yellow('📚 Got page from cache', page));
-        return page;
-    }
+    // if (page) {
+    //     console.log(chalk.yellow('📚 Got page from cache', page));
+    //     return page;
+    // }
 
     console.log(chalk.green('🔍 Scraping page...'));
     const firecrawl = new FirecrawlApp({ apiKey: fireCrawlApiKey });
@@ -59,29 +59,29 @@ async function getPage(url: string): Promise<Page> {
     // const url = result.metadata?.url;
     const title = result.metadata?.title;
     const description = result.metadata?.description;
-    const content = result.markdown;
+    const text = result.markdown;
     const links = extractLinks(result.markdown);
 
     // TODO: add summary?
 
     // TODO: add embedding
 
-    pagesFile.pages.push({
-        url,
-        title,
-        description,
-        content,
-        links
-    });
+    // pagesFile.pages.push({
+    //     url,
+    //     title,
+    //     description,
+    //     content,
+    //     links
+    // });
 
     // TODO: write to qdrant instead
-    await writeFile(path.join(__dirname, 'pages.json'), JSON.stringify(pagesFile, null, 2));
+    // await writeFile(path.join(__dirname, 'pages.json'), JSON.stringify(pagesFile, null, 2));
 
     return {
         url,
         title,
         description,
-        content,
+        text,
         links
     } as Page;
 }
@@ -168,7 +168,7 @@ Return answer in following json format:
     // const page = await getPage(contactPageUrl);
     // const page = await getPage(portfolioBanan);
 
-    console.log('page:', page);
+    // console.log('page:', page);
 
         // .then((result) => {
         //     const url = result.metadata?.url;
@@ -253,48 +253,55 @@ async function main() {
     const searchResults = await vectorService.performSearch(COLLECTION_NAME, question, {}, 1);
     let page;
 
-    if (searchResults.length > 0) {
-        page = searchResults[0].payload;
-    }
-
-    console.log('search results', searchResults);
+    console.log('Got page from database, search results:', searchResults);
 
     let link = mainPageUrl;
 
+    // GET page either from database or from web
     if (searchResults!.length === 0) {
         console.log('no page for question in database');
 
         // while (!answer) {
             // getting page
-            const page = await getPage(link);
+            page = await getPage(link);
 
             // adding it to db
             const metadata = { ...page };
-            delete metadata.content;
+            delete metadata.text;
 
             vectorService.addPoints(COLLECTION_NAME, [{
-                text: page.content ?? '',
+                text: page.text ?? '',
                 metadata
             }]);
 
-            // TODO: add page to qdrant
-            console.log('page links', page.links);
-            const answerResponse = await getAnswer(openAIService, question, page.content);
+            // page = {
+            //     text: page.text,
+            //     ...metadata
+            // } as Page;
 
-            if (!answerResponse.answer) {
-                pagesChecked.add(page.url);
-                console.log('No answer found in page content. Searching for most probable link...');
-                const links = page.links.filter((link) => !pagesChecked.has(link.url));
-                const mostProbableLink = await pickMostProbableLink(openAIService, links, question);
-                console.log('most probable link:', mostProbableLink);
-                link = mostProbableLink.url;
-            } else {
-                answer = answerResponse.answer;
-            }
         // }
 
-        console.log(chalk.greenBright('🎉 Got answer to question:', answer));
     } else {
+        console.log('got page for question from database');
+        page = searchResults[0].payload;
+    }
+
+    // GET answer from page
+    console.log('page links', page.links);
+    const answerResponse = await getAnswer(openAIService, question, page.text);
+
+    if (!answerResponse.answer) {
+        // TODO: no answer, set new link to go through and advance loop
+        pagesChecked.add(page.url);
+        console.log('No answer found in page content. Searching for most probable link...');
+        const links = page.links.filter((link) => !pagesChecked.has(link.url));
+        const mostProbableLink = await pickMostProbableLink(openAIService, links, question);
+        console.log('most probable link:', mostProbableLink);
+        link = mostProbableLink.url;
+    } else {
+        // TODO: got answer, break the loop
+        console.log(chalk.greenBright('🎉 Got answer to question:', answer));
+        answer = answerResponse.answer;
     }
 
     // const answer = await getAnswer(questions['01']);
