@@ -122,7 +122,7 @@ async function getQuestions() {
         questions = {};
     }
 
-    console.log(chalk.cyanBright('questions:', questions));
+    console.log(chalk.cyanBright('questions:'), questions);
 
     return questions;
 }
@@ -245,63 +245,64 @@ async function main() {
 
     const questions = await getQuestions();
     const question = questions['01'];
+    let link = mainPageUrl;
     let answer;
 
     const pagesChecked = new Set();
 
     // TODO: potential answer
-    const searchResults = await vectorService.performSearch(COLLECTION_NAME, question, {}, 1);
-    let page;
+    while (!answer) {
+        const searchResults = await vectorService.performSearch(COLLECTION_NAME, question, {}, 1);
+        let page;
 
-    console.log('Got page from database, search results:', searchResults);
+        console.log('Got page from database, search results:', searchResults);
 
-    let link = mainPageUrl;
+        // GET page either from database or from web
+        if (searchResults!.length === 0) {
+            console.log('no page for question in database');
 
-    // GET page either from database or from web
-    if (searchResults!.length === 0) {
-        console.log('no page for question in database');
+            // while (!answer) {
+                // getting page
+                page = await getPage(link);
 
-        // while (!answer) {
-            // getting page
-            page = await getPage(link);
+                // adding it to db
+                const metadata = { ...page };
+                delete metadata.text;
 
-            // adding it to db
-            const metadata = { ...page };
-            delete metadata.text;
+                vectorService.addPoints(COLLECTION_NAME, [{
+                    text: page.text ?? '',
+                    metadata
+                }]);
 
-            vectorService.addPoints(COLLECTION_NAME, [{
-                text: page.text ?? '',
-                metadata
-            }]);
+                // page = {
+                //     text: page.text,
+                //     ...metadata
+                // } as Page;
 
-            // page = {
-            //     text: page.text,
-            //     ...metadata
-            // } as Page;
+            // }
 
-        // }
+        } else {
+            console.log('got page for question from database');
+            page = searchResults[0].payload;
+        }
 
-    } else {
-        console.log('got page for question from database');
-        page = searchResults[0].payload;
-    }
+        // GET answer from page
+        console.log('page links', page.links);
+        const answerResponse = await getAnswer(openAIService, question, page.text);
 
-    // GET answer from page
-    console.log('page links', page.links);
-    const answerResponse = await getAnswer(openAIService, question, page.text);
-
-    if (!answerResponse.answer) {
-        // TODO: no answer, set new link to go through and advance loop
-        pagesChecked.add(page.url);
-        console.log('No answer found in page content. Searching for most probable link...');
-        const links = page.links.filter((link) => !pagesChecked.has(link.url));
-        const mostProbableLink = await pickMostProbableLink(openAIService, links, question);
-        console.log('most probable link:', mostProbableLink);
-        link = mostProbableLink.url;
-    } else {
-        // TODO: got answer, break the loop
-        console.log(chalk.greenBright('🎉 Got answer to question:', answer));
-        answer = answerResponse.answer;
+        if (!answerResponse.answer) {
+            // TODO: no answer, set new link to go through and advance loop
+            pagesChecked.add(page.url);
+            console.log('No answer found in page content. Searching for most probable link...');
+            const links = page.links.filter((link) => !pagesChecked.has(link.url));
+            const mostProbableLink = await pickMostProbableLink(openAIService, links, question);
+            console.log('most probable link:', mostProbableLink);
+            link = mostProbableLink.url;
+        } else {
+            // TODO: got answer, break the loop
+            console.log(chalk.greenBright('🎉 Got answer to question:', answer));
+            answer = answerResponse.answer;
+        }
     }
 
     // const answer = await getAnswer(questions['01']);
