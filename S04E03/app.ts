@@ -8,7 +8,6 @@ import { readFile, writeFile } from 'fs/promises';
 import FirecrawlApp, { type ScrapeResponse } from '@mendable/firecrawl-js';
 import { OpenAIService } from '../mcr_lib/OpenAIService';
 import { VectorService } from '../mcr_lib/VectorService';
-import { write } from 'console';
 import path from 'path';
 
 const apiKey = process.env.CENTRALA;
@@ -49,7 +48,7 @@ async function getPage(url: string): Promise<Page> {
     //     return page;
     // }
 
-    console.log(chalk.green('🔍 Scraping page...'));
+    console.log(chalk.green('🔍 Scraping page url:'), url);
     const firecrawl = new FirecrawlApp({ apiKey: fireCrawlApiKey });
     const result = await firecrawl.scrapeUrl(url, {
         formats: ['markdown', 'links'],
@@ -96,8 +95,9 @@ function extractLinks(text: string) {
 
     while ((match = re.exec(text))) {
         const [_, linkText, url, title] = match;
+        const hasHost = url.startsWith(baseUrl);
         const link = {
-            url: baseUrl + url,
+            url: hasHost ? url : baseUrl + url,
             linkText,
             title
         }
@@ -151,7 +151,10 @@ Return answer in following json format:
             temperature: 1.0,
             jsonMode: true
         }
-    );
+    )
+        .then((response) => {
+            return JSON.parse(response);
+        });
 
 
     // TODO: add openai chat completion for above prompt
@@ -196,22 +199,23 @@ Return answer in following json format:
 }
 
 async function pickMostProbableLink(openAIService: OpenAIService, links: Link[], question: string) {
-    const prompt = `You are about to be asked a question by the user. Pick most probable page link to follow to get an answer to asked question. Use links from json containing links.
+    const prompt = `You are about to be asked a question by the user. Pick most probable page link to follow to get an answer to asked question. Pick one from provided links:
+<json>
+${JSON.stringify(links, null, 2)}
+</json>
+
 <thinking>
 Consider link url and linkText and title which are in Polish language.
 </thinking>
 
-<json>
-${links}
-</json>
-
-Return most probable link in json format:
+Return most probable link in the same json format as provided above json:
 {
 "url": url,
 "linkText": linkText
 "title": title
 }`;
 
+// console.log('mcpl prompt', prompt);
     return openAIService.send(
         question,
         [
@@ -222,10 +226,13 @@ Return most probable link in json format:
         ],
         {
             model: 'gpt-4o',
-            temperature: 1.0,
+            temperature: 0.5,
             jsonMode: true
         }
-    );
+    )
+        .then((response) => {
+            return JSON.parse(response);
+        });
 }
 
 
@@ -244,7 +251,8 @@ async function main() {
     await vectorService.ensureCollection(COLLECTION_NAME);
 
     const questions = await getQuestions();
-    const question = questions['01'];
+
+    const question = questions['03'];
     let link = mainPageUrl;
     let answer;
 
@@ -252,13 +260,18 @@ async function main() {
 
     // TODO: potential answer
     while (!answer) {
+        // TODO: this needs to take new link/page
         const searchResults = await vectorService.performSearch(COLLECTION_NAME, question, {}, 1);
         let page;
 
         console.log('Got page from database, search results:', searchResults);
 
         // GET page either from database or from web
-        if (searchResults!.length === 0) {
+        if (searchResults!.length > 0 && searchResults[0].score > 0.5) {
+            console.log('got page for question from database');
+            page = searchResults[0].payload;
+        }
+        else {
             console.log('no page for question in database');
 
             // while (!answer) {
@@ -280,28 +293,41 @@ async function main() {
                 // } as Page;
 
             // }
-
-        } else {
-            console.log('got page for question from database');
-            page = searchResults[0].payload;
         }
 
         // GET answer from page
-        console.log('page links', page.links);
+        // console.log('page links', page.links);
         const answerResponse = await getAnswer(openAIService, question, page.text);
 
-        if (!answerResponse.answer) {
+        console.log('mcr answerResponse', answerResponse);
+
+        if (!answerResponse.answer || answerResponse.answer === 'false') {
             // TODO: no answer, set new link to go through and advance loop
             pagesChecked.add(page.url);
             console.log('No answer found in page content. Searching for most probable link...');
             const links = page.links.filter((link) => !pagesChecked.has(link.url));
+            console.log('Links to check:', links);
             const mostProbableLink = await pickMostProbableLink(openAIService, links, question);
             console.log('most probable link:', mostProbableLink);
             link = mostProbableLink.url;
+
+            console.log('mcr debug getting page link', link, typeof mostProbableLink);
+            page = await getPage(link);
+
+            // adding it to db
+            const metadata = { ...page };
+            delete metadata.text;
+
+            vectorService.addPoints(COLLECTION_NAME, [{
+                text: page.text ?? '',
+                metadata
+            }]);
+
+            // TODO: scrape page and add to database
         } else {
             // TODO: got answer, break the loop
-            console.log(chalk.greenBright('🎉 Got answer to question:', answer));
             answer = answerResponse.answer;
+            console.log(chalk.greenBright('🎉 Got answer to question:', answer));
         }
     }
 

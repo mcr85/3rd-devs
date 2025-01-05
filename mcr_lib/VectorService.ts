@@ -1,8 +1,6 @@
 import { QdrantClient } from '@qdrant/js-client-rest';
 import { v4 as uuidv4 } from 'uuid';
 import { OpenAIService } from './OpenAIService';
-import fs from 'fs/promises';
-import path from 'path';
 
 export class VectorService {
   private client: QdrantClient;
@@ -54,9 +52,6 @@ export class VectorService {
         }
       };
     }));
-
-    const pointsFilePath = path.join(__dirname, 'points.json');
-    await fs.writeFile(pointsFilePath, JSON.stringify(pointsToUpsert, null, 2));
 
     await this.client.upsert(collectionName, {
       wait: true,
